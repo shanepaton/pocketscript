@@ -3,14 +3,19 @@ flt f = 1.05;
 str s = "hello";
 bin b = true;
 
-print(i);
-print(f);
-print(s);
-print(b);
-
-fun void f(int i) {
-    return "hello";
+fun void main() {
+    print("Hello, world!");
 };
 
+if (i < 2) {
+    print("true");
+} else {
+    print("false");
+};
 
-print(f(1));
+while (i < 10) {
+    print(i);
+    int i = i + 1;
+};
+
+main();

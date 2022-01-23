@@ -183,6 +183,15 @@ class IfStmt:
         elif self.elseb is not None:
             self.elseb.resolve()
 
+class WhileStmt:
+    def __init__(self, cond, body):
+        self.cond = cond
+        self.body = body
+
+    def resolve(self):
+        while self.cond.resolve():
+            self.body.resolve()
+
 class ReturnStmt:
     def __init__(self, value):
         self.value = value
@@ -210,7 +219,7 @@ class FuncBody:
         o = self.operands
         b = self.body
         def _t(*args):
-            print(o)
+            # print(o)
             for i in range(len(args)):
                 env[o[i][1]] = args[i]
             return b.resolve()
@@ -248,7 +257,7 @@ class Parser():
 
     def void(self):
         if self.peek("VOID"):
-            return Bool(self.eat("VOID"))
+            return Void(self.eat("VOID"))
  
     def funccall(self):
         function_name = self.eat("ID")
@@ -287,6 +296,8 @@ class Parser():
             result = self.funcbody()
         elif self.peek("if"):
             result = self.ifs()
+        elif self.peek("while"):
+            result = self.whiles()
         else:
             result = self.funccall()
         self.eat(";")
@@ -311,6 +322,26 @@ class Parser():
             self.eat('}')
             return IfStmt(cond, Block(body), Block(ebody))
         return IfStmt(cond, Block(body), None)
+
+    def whiles(self):
+        self.eat('while')
+        self.eat('(')
+        cond = self.expr()
+        self.eat(')')
+        self.eat('{')
+        body = []
+        while not self.peek('}'):
+            body.append(self.stmt())
+        self.eat('}')
+        if self.peek('else'):
+            self.eat('else')
+            self.eat('{')
+            ebody = []
+            while not self.peek('}'):
+                ebody.append(self.stmt())
+            self.eat('}')
+            return WhileStmt(cond, Block(body))
+        return WhileStmt(cond, Block(body))   
 
     def root(self):
         body = []
