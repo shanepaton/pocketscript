@@ -1,9 +1,27 @@
 import re
 import sys
 
+from colorama import Fore, Style, init
+
+repl = False
+
+def errorStatement(msg):
+    print(Fore.RED, "\b" + "SYNTAX ERROR: " + msg + Style.RESET_ALL)
+    if not repl:
+        exit(1)
+
+def psUserException(msg):
+    print(Fore.RED, "\b" + msg + Style.RESET_ALL)
+    if not repl:
+        exit(1)
+        
+init()
+
 env = {
-    "print": print,
+    "print": lambda x: print(x, end=""),
+    "println": print,
     "input": input,
+    "error": psUserException,
 }
 
 types = ["int", "flt", "str", "bin"]
@@ -18,13 +36,18 @@ VOID     = 'VOID'
 ID       = 'ID'
 EOF      = 'EOF'
 OP       = 'OP'
+VAROP    = 'VAROP'
 
 token_exprs = [
     (r'(["])((?:(?=(?:\\)*)\\.|.)*?)\1', STR),
     (r'[ \n\t]+',              None),
     (r'#[^\n]*',               None),
+    (r'\+=', VAROP),
+    (r'-=', VAROP),
+    (r'/=', VAROP),
+    (r'\*=', VAROP),
     (r'==', OP),
-    (r'\=', RESERVED),
+    (r'\=', VAROP),
     (r'\(', RESERVED),
     (r'\)', RESERVED),
     (r';', RESERVED),
@@ -52,10 +75,11 @@ token_exprs = [
     (r'while', RESERVED),
     (r'true|false', BIN),
     (r'use', RESERVED),
-    (r'[+-]?([0-9]*[.])?[0-9]+',FLT),
+    (r'[+-]?([0-9]*[.])[0-9]+',FLT),
     (r'[0-9]+',                INT),
     (r'[A-Za-z][A-Za-z0-9_]*', ID),
 ]
+
 def lex(characters):
     pos = 0
     line = 1
@@ -82,12 +106,19 @@ def lex(characters):
     tokens.append((None, EOF, pos, line))
     return tokens
 
+def typeStr(v):
+    if isinstance(v, int): return "int"
+    if isinstance(v, float): return "flt"
+    if isinstance(v, str): return "str"
+    if isinstance(v, bool): return "bin"
+
+
 class Number:
     def __init__(self, value):
         self.value = value
 
     def resolve(self):
-        return self.value
+        return int(self.value)
 
 class Float:
     def __init__(self, value):
@@ -155,13 +186,55 @@ class BinOp:
             case '>':
                 return self.left.resolve() > self.right.resolve()
 
-class VarDecl:
-    def __init__(self, name, value):
-        self.name = name
-        self.value = value
+class VarOp:
+    def __init__(self, left, op, right):
+        self.left = left
+        self.op = op
+        self.right = right
 
     def resolve(self):
-        env[self.name] = self.value.resolve()
+        match self.op:
+            case '=':
+                v = self.right.resolve()
+                match typeStr(v):
+                    case "int":
+                        assert isinstance(v, int), errorStatement("Type mismatch in variable reference")
+                    case "flt":
+                        assert isinstance(v, float), errorStatement("Type mismatch in variable reference")
+                    case "str":
+                        assert isinstance(v, str), errorStatement("Type mismatch in variable reference")
+                    case "bin":
+                        assert isinstance(v, bool), errorStatement("Type mismatch in variable reference")
+
+                if self.left in env.keys() : env[self.left] = v
+            case '+=':
+                env[self.left] += self.right.resolve()
+            case '-=':
+                env[self.left] -= self.right.resolve()
+            case '*=':
+                env[self.left] *= self.right.resolve()
+            case '/=':
+                env[self.left] /= self.right.resolve()
+
+class VarDecl:
+    def __init__(self, name, value, typee):
+        self.name = name
+        self.value = value
+        self.typee = typee
+
+    def resolve(self):
+        v = self.value.resolve()
+        match self.typee:
+            case "int":
+                assert isinstance(v, int), errorStatement("Type mismatch in variable reference")
+            case "flt":
+                assert isinstance(v, float), errorStatement("Type mismatch in variable reference")
+            case "str":
+                assert isinstance(v, str), errorStatement("Type mismatch in variable reference")
+            case "bin":
+                assert isinstance(v, bool), errorStatement("Type mismatch in variable reference")
+
+        env[self.name] = v
 
 class FuncCall:
     def __init__(self, name, operands):
@@ -198,6 +271,7 @@ class ReturnStmt:
 
     def resolve(self):
         return self.value.resolve()
+        
 
 class Block:
     def __init__(self, body):
@@ -209,20 +283,57 @@ class Block:
                 return i.resolve()
             i.resolve()
 
+class Use:
+    def __init__(self, fn):
+        self.fn = fn
+
+    def resolve(self):
+        env = {}
+        for i in Parser(lex(open(self.fn.resolve()).read())).root():
+            i.resolve()
+        globals()["env"].update(env)
+        
+
+
 class FuncBody:
-    def __init__(self, name, operands, body):
+    def __init__(self, name, operands, body, typee):
         self.name = name
         self.operands = operands
         self.body = body
+        self.typee = typee
 
     def resolve(self):
         o = self.operands
         b = self.body
+        t = self.typee
         def _t(*args):
-            # print(o)
             for i in range(len(args)):
+                if isinstance(args[i], int): 
+                    assert o[i][0] == "int", "Type mismatch"
+                elif isinstance(args[i], float):
+                    assert o[i][0] == "flt", "Type mismatch"
+                elif isinstance(args[i], str):
+                    assert o[i][0] == "str", "Type mismatch"
+                elif isinstance(args[i], bool):
+                    assert o[i][0] == "bin", "Type mismatch"
+                else:
+                    print(args[i])
+
                 env[o[i][1]] = args[i]
-            return b.resolve()
+                
+            v = b.resolve()
+            
+            if isinstance(v, int): 
+                    assert t == "int", "Type mismatch"
+            elif isinstance(v, float):
+                assert t == "flt", "Type mismatch"
+            elif isinstance(v, str):
+                assert t == "str", "Type mismatch"
+            elif isinstance(v, bool):
+                assert t == "bin", "Type mismatch"
+
+            return v
+
         env[self.name] = _t
 
 class Parser():
@@ -231,14 +342,16 @@ class Parser():
 
     
     def peek(self, ttype):
-        if ttype not in (INT, FLT, STR, BIN, ID, EOF, OP, VOID, TYPE):
+        if ttype not in (INT, FLT, STR, BIN, ID, EOF, OP, VAROP, VOID, TYPE):
             return self.tokens[0][0] == ttype
             
         else:
             return self.tokens[0][1] == ttype
 
     def eat(self, ttype):
-        assert self.peek(ttype), ttype
+        # assert self.peek(ttype), ttype
+        if not self.peek(ttype):
+            errorStatement("Missing %s" %ttype)
         return self.tokens.pop(0)[0]
 
     def number(self):
@@ -283,11 +396,21 @@ class Parser():
         while not self.peek("}"):
             body.append(self.stmt())
         self.eat("}")
-        return FuncBody(function_name, operands, Block(body))
+        return FuncBody(function_name, operands, Block(body), function_type)
 
     def stmt(self):
         result = None
-        if self.peek("return"):
+        if self.peek("ID"):
+            if self.tokens[1][0] == "(":
+                result = self.funccall()
+            
+            elif self.tokens[1][1] == VAROP:
+                left = self.eat('ID')
+                op = self.eat('VAROP')
+                right = self.expr()
+                print(left,op,right)
+                result = VarOp(left, op, right)
+        elif self.peek("return"):
             self.eat("return")
             result =  ReturnStmt(self.expr())
         elif self.peek("TYPE"):
@@ -298,8 +421,11 @@ class Parser():
             result = self.ifs()
         elif self.peek("while"):
             result = self.whiles()
+        elif self.peek("use"):
+            result = self.use()
         else:
-            result = self.funccall()
+            errorStatement("PARSER ERROR" + self.tokens)
+            # result = self.funccall()
         self.eat(";")
         return result
 
@@ -322,7 +448,7 @@ class Parser():
             self.eat('}')
             return IfStmt(cond, Block(body), Block(ebody))
         return IfStmt(cond, Block(body), None)
-
+    
     def whiles(self):
         self.eat('while')
         self.eat('(')
@@ -341,6 +467,7 @@ class Parser():
                 ebody.append(self.stmt())
             self.eat('}')
             return WhileStmt(cond, Block(body))
+            
         return WhileStmt(cond, Block(body))   
 
     def root(self):
@@ -350,62 +477,60 @@ class Parser():
 
         return body
 
-    def binop(self):
-        left = self.expr()
-        op = self.eat("OP")
-        right = self.expr()
-        return BinOp(left, op, right)
+    def expr(self, binop=False):
+        if not binop and self.tokens[1][1] == OP:
+            left = self.expr(True)
+            op = self.eat('OP')
+            right = self.expr()
+            return BinOp(left, op, right)
 
-    def expr(self):
         if self.peek("ID"):
             if self.tokens[1][0] == "(":
                 return self.funccall()
-            elif self.tokens[1][1] != "OP":
-                return VariableLookup(self.eat("ID"))
-            else:
-                left = VariableLookup(self.eat("ID"))
-                op = self.eat("OP")
-                right = self.expr()
-                return BinOp(left, op, right)
+            return VariableLookup(self.eat("ID"))
             
         elif self.peek("INT") or self.peek("FLT"):
             if self.tokens[1][1] != "OP":
                 return self.number()
-            else:
-                left = self.number()
-                op = self.eat("OP")
-                right = self.expr()
-                return BinOp(left, op, right)
         elif self.peek("STR"):
             return self.string()
         elif self.peek("BIN"):
             return self.tbool()
         else:
-            return self.binop()
+            raise Exception("wtf are you doing: CODE ID10T")
+        
+       
     
     def varDecl(self):
         ttype = self.eat("TYPE")
         name = self.eat("ID")
         self.eat("=")
         value = self.expr()
-        return VarDecl(name, value)
+        return VarDecl(name, value, ttype)
 
-# open file if arg is given
+    def use(self):
+        self.eat("use")
+        return Use(self.string())
+
 if len(sys.argv) > 1:
-    file = open(sys.argv[1], 'r')
-    characters = file.read()
-    parser = Parser(lex(characters))
-    for i in parser.root():
-        i.resolve()
+   #try:
+        file = open(sys.argv[1], 'r')
+        characters = file.read()
+        parser = Parser(lex(characters))
+        for i in parser.root():
+            i.resolve()
+    # except Exception as e:
+    #     print("", end="")
 else:
+    repl = True
     while True:
         try:
-            inp = input("pocketscript> ").strip()
+            inp = input("pocketscript >> ").strip()
             parser = Parser(lex(inp))
             for i in parser.root():  
                 result = i.resolve()
                 if result != None:
                     print(result)
         except Exception as e:
-            print("Syntax Error -> Missing " + str(e) + " on line " + str(parser.tokens[0][3]))
+            print("", end="")
         
