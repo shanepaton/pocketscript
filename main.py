@@ -1,5 +1,7 @@
+from random import randint, randrange, uniform
 import re
 import sys
+from time import sleep
 
 from colorama import Fore, Style, init
 
@@ -20,7 +22,11 @@ init()
 env = {
     "print": lambda x: print(x, end=""),
     "println": print,
+    "sleep": lambda s: sleep(float(s)),
     "input": input,
+    "randint": lambda x, y: int(randint(x, y)),
+    "randflt": lambda x, y: float(uniform(x, y)),
+    "rnd": round,
     "error": psUserException,
 }
 
